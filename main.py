@@ -4,13 +4,6 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, func, s
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import MetaData
 
-import sys
-from time import sleep
-from telethon.errors.rpc_errors_400 import UsernameNotOccupiedError
-from telethon.tl.functions.channels import GetParticipantsRequest
-from telethon.tl.functions.contacts import ResolveUsernameRequest
-from telethon.tl.types import ChannelParticipantsSearch, InputChannel
-
 import sqlalchemy
 import configparser
 
