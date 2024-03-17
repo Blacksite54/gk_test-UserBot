@@ -1,7 +1,15 @@
 from pyrogram import Client, filters
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, func, schema
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, func, schema, Table
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import MetaData
+
+import sys
+from time import sleep
+from telethon.errors.rpc_errors_400 import UsernameNotOccupiedError
+from telethon.tl.functions.channels import GetParticipantsRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+from telethon.tl.types import ChannelParticipantsSearch, InputChannel
 
 import sqlalchemy
 import configparser
@@ -16,6 +24,18 @@ engine = create_engine('sqlite:///database.db')
 Session = sessionmaker(engine)
 Base = sqlalchemy.orm.declarative_base()
 
+metadata = MetaData()
+
+users_table = Table('users', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('status', String(10), default='alive'),
+    Column('status_updated_at', DateTime, server_default=func.now(), onupdate=func.now())
+)
+
+engine = create_engine('sqlite:///database.db')
+metadata.create_all(engine)
+
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
@@ -29,7 +49,24 @@ session.commit()
 
 dp = Client("my_account", api_id=api_id, api_hash=api_hash)
 
-@dp.on_message(filters.private) # т.к. в ТЗ не говорится, на кого именно применять, использую private. TODO: поменять при необходимости
+
+async def parse_chat(channel_name):
+    async for member in dp.get_chat_members(channel_name):
+        user = session.get(User, member.user.id)
+        if user is None:
+            user = User()
+            user.id = member.user.id
+            session.add(user)
+        session.commit()
+
+
+@dp.on_message(filters.command('get_chat'))
+async def get_chat(client, message):
+    channel_name = message.text.split('get_chat')[1].lstrip(' ')
+    await parse_chat(channel_name)
+
+
+@dp.on_message(filters.me) # TODO: поменять при необходимости
 def filter(client, message):
     current_user = session.query(User).filter(User.id == message.from_user.id).first() # проверяем, есть ли уже такой пользователь в БД
 
@@ -37,19 +74,18 @@ def filter(client, message):
         session.add(User(id=message.from_user.id))
         session.commit()
 
-    for user in session.query(User).filter(User.status == 'alive'): # проходка по всем 'alive' пользователям
+    user = session.query(User).filter(User.id == message.from_user.id, User.status == 'alive').one_or_none()
+    if user:
         try:
             if any(word in message.text for word in ["прекрасно", "ожидать"]):
                 user.status = 'finished'
                 user.status_updated_at = func.now()
                 session.commit()
-                # TODO: если надо прекратить работу бота (закрыть воронку), добавить - client.stop_polling()
-                break
+                client.stop_polling()
         except Exception as e: # если ошибка при проверке, статус 'dead'
             user.status = 'dead'
             user.status_updated_at = func.now()
             session.commit()
-            break
 
     alive_users = session.query(User).filter(User.status == 'alive').count() # получаем число 'alive' пользователей
     message.reply_text(f"Количество alive пользователей: {alive_users}")
